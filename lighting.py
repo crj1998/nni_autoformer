@@ -5,7 +5,6 @@ import pytorch_lightning as pl
 
 import nni
 
-# from nni.retiarii.evaluator.pytorch.lightning import Lightning, LightningModule, AccuracyWithLogits, Trainer
 from nni.nas.evaluator.pytorch.lightning import Lightning, LightningModule, AccuracyWithLogits, Trainer
 
 
@@ -13,7 +12,7 @@ from nni.nas.evaluator.pytorch.lightning import Lightning, LightningModule, Accu
 class _SupervisedLearningModule(LightningModule):
     trainer: pl.Trainer
     def __init__(self, criterion, optimizer, scheduler, metrics, epochs, 
-        warmup=0, learning_rate=0.001, weight_decay=0., betas=(0.9, 0.999), min_lr=0.00001, mixup=None
+        warmup=0, learning_rate=0.001, weight_decay=0., betas=(0.9, 0.999), min_lr=0.00001, mixup=None, weights=None
     ):
         super().__init__()
         self.save_hyperparameters('learning_rate', 'weight_decay', 'betas', 'epochs', 'warmup', 'min_lr')
@@ -22,6 +21,7 @@ class _SupervisedLearningModule(LightningModule):
         self.scheduler = scheduler
         self.metrics = nn.ModuleDict({name: cls() for name, cls in metrics.items()})
         self.mixup_fn = mixup
+        self.weights = weights
 
     def forward(self, x):
         return self.model(x)
@@ -79,6 +79,10 @@ class _SupervisedLearningModule(LightningModule):
             # Don't report metric when sanity checking
             nni.report_intermediate_result(self._get_validation_metrics())
 
+    def on_fit_start(self):
+        if self.weights is not None:
+            self.model.load_state_dict(self.weights)
+        
     def on_fit_end(self):
         if self.running_mode == 'multi':
             nni.report_final_result(self._get_validation_metrics())
@@ -95,10 +99,10 @@ class _SupervisedLearningModule(LightningModule):
 class Classification(Lightning):
     def __init__(self, criterion, optimizer, scheduler, mixup, 
         learning_rate, weight_decay, warmup,
-        train_dataloaders, val_dataloaders, 
+        train_dataloaders, val_dataloaders, weights=None,
         **trainer_kwargs
     ):
         module = _SupervisedLearningModule(
             criterion, optimizer, scheduler, {'acc': AccuracyWithLogits}, trainer_kwargs.get("max_epochs", 500),
-            warmup, learning_rate, weight_decay, mixup=mixup)
+            warmup, learning_rate, weight_decay, mixup=mixup, weights=weights)
         super().__init__(module, Trainer(**trainer_kwargs), train_dataloaders=train_dataloaders, val_dataloaders=val_dataloaders)

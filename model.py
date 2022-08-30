@@ -18,7 +18,6 @@ def builder(name: str, num_classes: int = 1000):
     #         'search_num_heads': (7, 6, 5),
     #         'search_depth': (14, 13, 12),
     #     })
-
     # elif name == 'base':
     #     init_kwargs.update({
     #         'search_embed_dim': (624, 576, 528),
@@ -42,7 +41,6 @@ def builder(name: str, num_classes: int = 1000):
             'search_num_heads': (5, 6, 7),
             'search_depth': (12, 13, 14),
         })
-
     elif name == 'base':
         init_kwargs.update({
             'search_embed_dim': (528, 576, 624),
@@ -52,7 +50,7 @@ def builder(name: str, num_classes: int = 1000):
         })
     else:
         raise ValueError(f"Unknown model name {name}.")
-        
+
     model_space = AutoformerSpace(**init_kwargs)
 
     return model_space

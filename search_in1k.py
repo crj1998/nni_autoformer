@@ -3,8 +3,9 @@ import numpy as np
 from copy import deepcopy
 
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
-from torchvision.datasets import CIFAR10, ImageFolder
+from torchvision.datasets import ImageFolder
 import torchvision.transforms as T
 
 
@@ -28,9 +29,13 @@ class LatencyFilter:
         latency = self.predictors.predict(ir_model, 'nni-ir')
         return latency < self.threshold
 
+@nni.trace
+def builder(name: str, num_classes: int = 1000):
+    return model_builder(name, num_classes)
 
 @torch.no_grad()
 def evaluate_acc(class_cls, model_space, args):
+    # model_space = model_builder(args.name, args.num_classes)
     model_space = deepcopy(model_space)
     # define one-shot strategy
     strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
@@ -53,14 +58,12 @@ def evaluate_acc(class_cls, model_space, args):
     IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
     transform = T.Compose([
-        T.Resize(224, interpolation=T.InterpolationMode.BICUBIC),
+        T.Resize(256, interpolation=T.InterpolationMode.BICUBIC),
+        T.CenterCrop(224),
         T.ToTensor(),
         T.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
     ])
-    if args.dataset.lower() == "cifar10":
-        dataset = CIFAR10(args.datapath, download=False, train=False, transform=transform)
-    else:
-        dataset = ImageFolder(args.datapath, transform=transform)
+    dataset = ImageFolder(args.datapath, transform=transform)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False)
 
     total, correct = 0, 0
@@ -76,22 +79,25 @@ def evaluate_acc(class_cls, model_space, args):
 
     nni.report_final_result(acc)
 
-@nni.trace
-def builder(name: str, num_classes: int = 1000):
-    return model_builder(name, num_classes)
 
 def main(args):
-    model_space = model_builder(name=args.name, num_classes=args.num_classes)
+    model_space = model_builder(args.name, args.num_classes)
 
     model_filter = LatencyFilter(threshold=args.latency_threshold, predictor=args.latency_filter) if args.latency_filter else None
     # latency_filter = None
     evaluator = FunctionalEvaluator(evaluate_acc, model_space=model_space, args=args)
     evolution_strategy = Random(model_filter=model_filter)
-
+    # evolution_strategy = RegularizedEvolution(
+    #     sample_size=args.evolution_sample_size,
+    #     population_size=args.evolution_population_size,
+    #     cycles=args.max_trial_number,
+    #     model_filter=model_filter,
+    # )
+    
     exp = RetiariiExperiment(model_space, evaluator, strategy=evolution_strategy)
 
     exp_config = RetiariiExeConfig('local')
-    exp_config.experiment_name = 'Random Search(CIFAR10)'
+    exp_config.experiment_name = 'Random Search(ImageNet)'
     exp_config.trial_concurrency = args.gpus
     exp_config.trial_gpu_number = 1
     exp_config.max_trial_number = args.max_trial_number
@@ -111,7 +117,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("AutoFormer Evolutional Search")
     parser.add_argument("--port", type=int, default=8086)
     parser.add_argument("--gpus", type=int, default=6)
-    parser.add_argument("--dataset", type=str, default="imagenet", choices=["cifar10", "imagenet"])
     parser.add_argument("--datapath", type=str, default="/root/rjchen/data/ImageNet/train")
     parser.add_argument("--weights", type=str, default="./weights/supernet-tiny.pth")
     parser.add_argument("--name", choices=["tiny", "small", "base"], type=str, default="tiny", help="Autoformer size")
@@ -119,8 +124,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--max-trial-number", type=int, default=1000)
-    parser.add_argument("--evolution-sample-size", type=int, default=50)
+    parser.add_argument("--max-trial-number", type=int, default=512)
+    parser.add_argument("--evolution-sample-size", type=int, default=10)
     parser.add_argument("--evolution-population-size", type=int, default=50)
     parser.add_argument("--evolution-cycles", type=int, default=100)
     parser.add_argument("--latency-filter", type=str, default=None, help="Apply latency filter by calling the name of the applied hardware.")
@@ -128,21 +133,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     args.gpus = min(args.gpus, torch.cuda.device_count())
-    if args.dataset.lower() == "cifar10":
-        assert args.num_classes == 10
-    else:
-        assert args.num_classes == 1000
     # assert args.latency_filter in ["cortexA76cpu_tflite21", "adreno640gpu_tflite21", "adreno630gpu_tflite21", "myriadvpu_openvino2019r2"]
 
     # seed all
-    random.seed(args.seed)
+    # random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
     # torch.backends.cudnn.deterministic = True
 
     main(args)
-
-"""
-python search_cifar.py --weights /root/rjchen/workspace/autoformer/weights/finetuned220829.pth --datapath ../../data
-"""

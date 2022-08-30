@@ -3,14 +3,16 @@ import numpy as np
 from copy import deepcopy
 
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
-from torchvision.datasets import CIFAR10, ImageFolder
+from torchvision.datasets import CIFAR10
 import torchvision.transforms as T
 
 
 import nni
 from nni.nas.experiment.pytorch import RetiariiExeConfig, RetiariiExperiment
 from nni.nas.evaluator.functional import FunctionalEvaluator
+from nni.nas.hub.pytorch import AutoformerSpace
 from nni.nas.strategy import RandomOneShot, Random, RegularizedEvolution
 
 from nn_meter import load_latency_predictor
@@ -57,10 +59,8 @@ def evaluate_acc(class_cls, model_space, args):
         T.ToTensor(),
         T.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
     ])
-    if args.dataset.lower() == "cifar10":
-        dataset = CIFAR10(args.datapath, download=False, train=False, transform=transform)
-    else:
-        dataset = ImageFolder(args.datapath, transform=transform)
+
+    dataset = CIFAR10(args.datapath, download=False, train=False, transform=transform)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False)
 
     total, correct = 0, 0
@@ -111,11 +111,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("AutoFormer Evolutional Search")
     parser.add_argument("--port", type=int, default=8086)
     parser.add_argument("--gpus", type=int, default=6)
-    parser.add_argument("--dataset", type=str, default="imagenet", choices=["cifar10", "imagenet"])
     parser.add_argument("--datapath", type=str, default="/root/rjchen/data/ImageNet/train")
     parser.add_argument("--weights", type=str, default="./weights/supernet-tiny.pth")
     parser.add_argument("--name", choices=["tiny", "small", "base"], type=str, default="tiny", help="Autoformer size")
-    parser.add_argument("--num_classes", type=int, default=1000)
+    parser.add_argument("--num_classes", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=256)
@@ -128,10 +127,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     args.gpus = min(args.gpus, torch.cuda.device_count())
-    if args.dataset.lower() == "cifar10":
-        assert args.num_classes == 10
-    else:
-        assert args.num_classes == 1000
     # assert args.latency_filter in ["cortexA76cpu_tflite21", "adreno640gpu_tflite21", "adreno630gpu_tflite21", "myriadvpu_openvino2019r2"]
 
     # seed all

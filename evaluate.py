@@ -4,15 +4,14 @@ import numpy as np
 from tqdm import tqdm
 
 import torch
-import torch.nn as nn
-
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as T
 
-# import nni.retiarii.hub.pytorch as hub
+from nni.nas.strategy import RandomOneShot
+from nni.nas import fixed_arch
 
-from nni.nas.hub.pytorch import AutoformerSpace
+from model import builder as model_builder
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -22,34 +21,40 @@ IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 def validate(model, dataloader, device):
     model.eval()
     top1, top5, total = 0, 0, 0
-    with tqdm(dataloader) as t:
-        for data, target in t:
-            data, target = data.to(device), target.to(device)
-            topk = torch.topk(model(data), dim=-1, k=5, largest=True, sorted=True).indices
-            correct = topk.eq(target.view(-1, 1).expand_as(topk))
+    with tqdm(dataloader, total=len(dataloader), desc="Valid", ncols=100) as t:
+        for inputs, targets in t:
+            inputs, targets = inputs.to(device), targets.to(device)
+            topk = torch.topk(model(inputs), dim=-1, k=5, largest=True, sorted=True).indices
+            correct = topk.eq(targets.view(-1, 1).expand_as(topk))
             top1 += correct[:, 0].sum().item()
             top5 += correct[:, :5].sum().item()
-            total += target.size(0)
+            total += targets.size(0)
             t.set_postfix({"Top1": f"{top1/total:.2%}", "Top5": f"{top5/total:.2%}"})
     return top1/total, top5/total
 
 def main(args):
-    model_space = AutoformerSpace(
-        search_embed_dim = (192, 216, 240),
-        search_mlp_ratio = (3.0, 3.5, 4.0),
-        search_num_heads = (3, 4),
-        search_depth = (14, 13, 12),
-        qkv_bias = True, 
-        drop_rate = 0.0, 
-        drop_path_rate = 0.1, 
-        global_pool = True, 
-        num_classes = args.num_classes
-    )
-    if os.path.exists(args.weights) and os.path.isfile(args.weights):
-        model = model_space.load_searched_model(f"autoformer-{args.size}", pretrained=False, download=False)
-        model.load_state_dict(torch.load(args.weights))
-    else:
-        model = model_space.load_searched_model(f"autoformer-{args.size}", pretrained=True, download=True)
+    model_space = model_builder(args.name, args.num_classes)
+    for k, v in model_space.state_dict().items():
+        print(k, v.shape)
+
+    # if os.path.exists(args.weights) and os.path.isfile(args.weights):
+    #     model = model_space.load_searched_model(f"autoformer-{args.name}", pretrained=False, download=False)
+    #     model.load_state_dict(torch.load(args.weights))
+    # else:
+    #     model = model_space.load_searched_model(f"autoformer-{args.name}", pretrained=True, download=True)
+
+    strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
+    strategy.attach_model(model_space)
+    for k, v in model_space.state_dict().items():
+        print(k, v.shape)
+    exit()
+    strategy.model.load_state_dict(torch.load(args.weights))
+    args.arch = strategy.model.resample(args.arch)
+
+    with fixed_arch(args.arch):
+        model = model_builder(args.name, args.num_classes)
+        state_dict = strategy.sub_state_dict(args.arch)
+        model.load_state_dict(state_dict)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -71,8 +76,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser("AutoFormer Subnet Evaluate")
     parser.add_argument("--datapath", type=str, default="path/to/imagenet/val")
-    parser.add_argument("--weights", type=str, default="path/to/subnet.pth")
-    parser.add_argument("--size", choices=["tiny", "small", "base"], type=str, default="tiny")
+    parser.add_argument("--weights", type=str, default="path/to/supernet.pth")
+    parser.add_argument("--name", choices=["tiny", "small", "base"], type=str, default="tiny", help="Autoformer size")
 
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -80,7 +85,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_classes", type=int, default=1000)
 
     args = parser.parse_args()
-
+    # args.arch = {'embed_dim': 240, 'depth': 12, 'num_head_0': 3, 'mlp_ratio_0': 4.0, 'num_head_1': 4, 'mlp_ratio_1': 3.0, 'num_head_2': 3, 'mlp_ratio_2': 3.0, 'num_head_3': 3, 'mlp_ratio_3': 4.0, 'num_head_4': 3, 'mlp_ratio_4': 4.0, 'num_head_5': 4, 'mlp_ratio_5': 3.0, 'num_head_6': 3, 'mlp_ratio_6': 3.0, 'num_head_7': 3, 'mlp_ratio_7': 3.0, 'num_head_8': 3, 'mlp_ratio_8': 4.0, 'num_head_9': 3, 'mlp_ratio_9': 4.0, 'num_head_10': 4, 'mlp_ratio_10': 3.0, 'num_head_11': 4, 'mlp_ratio_11': 4.0, 'num_head_12': 4, 'mlp_ratio_12': 3.0, 'num_head_13': 3, 'mlp_ratio_13': 4.0}
+    args.arch = {'embed_dim': 192, 'depth': 13}
     # seed all
     random.seed(args.seed)
     np.random.seed(args.seed)

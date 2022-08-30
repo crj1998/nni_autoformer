@@ -11,20 +11,16 @@ from torchvision.datasets import CIFAR10
 import torchvision.transforms as T
 
 
-# from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-# from nni.retiarii.hub.pytorch import AutoformerSpace
-# import nni.retiarii.strategy as strategy
-# import nni.retiarii.evaluator.pytorch.lightning as pl
-
 from nni.nas.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from nni.nas.hub.pytorch import AutoformerSpace
 from nni.nas.strategy import RandomOneShot
 import nni.nas.evaluator.pytorch.lightning as pl
 
 from timm.data import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
+
 from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 
+from model import builder as model_builder
 from lighting import Classification
 
 def main(args):
@@ -59,7 +55,15 @@ def main(args):
     else:
         criterion = nn.CrossEntropyLoss()
 
+    if os.path.exists(args.weights) and os.path.isfile(args.weights):
+        state_dict = torch.load(args.weights)
+        state_dict["head.weight"] = torch.randn_like(state_dict["head.weight"][:10])
+        state_dict["head.bias"] = torch.randn_like(state_dict["head.bias"][:10])
+    else:
+        state_dict = None
+    
     evaluator = Classification(
+        weights = state_dict,
         criterion = criterion,
         optimizer = optim.AdamW,
         scheduler = LinearWarmupCosineAnnealingLR,
@@ -78,18 +82,8 @@ def main(args):
         strategy = "ddp"
     )
 
-    model_space = AutoformerSpace(
-        search_embed_dim = (192, 216, 240),
-        search_mlp_ratio = (3.0, 3.5, 4.0),
-        search_num_heads = (3, 4),
-        search_depth = (12, 13, 14),
-        qkv_bias = True, 
-        drop_rate = 0.0, 
-        drop_path_rate = 0.1, 
-        global_pool = True, 
-        num_classes = args.num_classes
-    )
-    model_space.load.state_dict(torch.load(args.weights))
+    model_space = model_builder(args.name, args.num_classes)
+
     strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
 
     exp = RetiariiExperiment(model_space, evaluator, [], strategy)
@@ -99,12 +93,13 @@ def main(args):
 
     exp.run(exp_config, args.port)
 
-    torch.save(model_space.state_dict(), "finetuned.pth")
+    torch.save(model_space.state_dict(), "weights/finetuned220830.pth")
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser("AutoFormer fine-tune")
     parser.add_argument("--port", type=int, default=6002)
+    parser.add_argument("--name", choices=["tiny", "small", "base"], type=str, default="tiny", help="Autoformer size")
     parser.add_argument("--datapath", type=str, default="path/to/cifar10")
     parser.add_argument("--num_classes", type=int, default=10)
     parser.add_argument("--weights", type=str, required=True, default="")
@@ -126,6 +121,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+
+
     # seed all
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -137,3 +134,6 @@ if __name__ == "__main__":
 
     main(args)
 
+"""
+CUDA_VISIBLE_DEVICES=0,1,2,3 python finetune.py --weights /root/rjchen/workspace/autoformer/weights/supernet20220822.pth --datapath /root/rjchen/data --epochs 50 --warmup 5 --gpus 4 --learning_rate 0.0005
+"""

@@ -93,7 +93,7 @@ def main(args):
 
     exp.run(exp_config, args.port)
 
-    torch.save(model_space.state_dict(), "supernet.pth")
+    torch.save(model_space.state_dict(), "weights/supernet20220822.pth")
 
 if __name__ == "__main__":
     import argparse
