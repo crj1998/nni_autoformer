@@ -32,29 +32,27 @@ def validate(model, dataloader, device):
             t.set_postfix({"Top1": f"{top1/total:.2%}", "Top5": f"{top5/total:.2%}"})
     return top1/total, top5/total
 
+
 def main(args):
     model_space = model_builder(args.name, args.num_classes)
-    for k, v in model_space.state_dict().items():
-        print(k, v.shape)
 
-    # if os.path.exists(args.weights) and os.path.isfile(args.weights):
-    #     model = model_space.load_searched_model(f"autoformer-{args.name}", pretrained=False, download=False)
-    #     model.load_state_dict(torch.load(args.weights))
-    # else:
-    #     model = model_space.load_searched_model(f"autoformer-{args.name}", pretrained=True, download=True)
+    if isinstance(args.arch, dict):
+        strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
+        strategy.attach_model(model_space)
 
-    strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
-    strategy.attach_model(model_space)
-    for k, v in model_space.state_dict().items():
-        print(k, v.shape)
-    exit()
-    strategy.model.load_state_dict(torch.load(args.weights))
-    args.arch = strategy.model.resample(args.arch)
+        strategy.model.load_state_dict(torch.load(args.weights))
+        args.arch = strategy.model.resample(args.arch)
 
-    with fixed_arch(args.arch):
-        model = model_builder(args.name, args.num_classes)
-        state_dict = strategy.sub_state_dict(args.arch)
-        model.load_state_dict(state_dict)
+        with fixed_arch(args.arch):
+            model = model_builder(args.name, args.num_classes)
+            state_dict = strategy.sub_state_dict(args.arch)
+            model.load_state_dict(state_dict)
+    else:
+        if os.path.exists(args.weights) and os.path.isfile(args.weights):
+            model = model_space.load_searched_model(f"autoformer-{args.name}", pretrained=False, download=False)
+            model.load_state_dict(torch.load(args.weights))
+        else:
+            model = model_space.load_searched_model(f"autoformer-{args.name}", pretrained=True, download=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -74,6 +72,7 @@ def main(args):
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser("AutoFormer Subnet Evaluate")
     parser.add_argument("--datapath", type=str, default="path/to/imagenet/val")
     parser.add_argument("--weights", type=str, default="path/to/supernet.pth")
@@ -85,8 +84,9 @@ if __name__ == "__main__":
     parser.add_argument("--num_classes", type=int, default=1000)
 
     args = parser.parse_args()
+    args.arch = None
     # args.arch = {'embed_dim': 240, 'depth': 12, 'num_head_0': 3, 'mlp_ratio_0': 4.0, 'num_head_1': 4, 'mlp_ratio_1': 3.0, 'num_head_2': 3, 'mlp_ratio_2': 3.0, 'num_head_3': 3, 'mlp_ratio_3': 4.0, 'num_head_4': 3, 'mlp_ratio_4': 4.0, 'num_head_5': 4, 'mlp_ratio_5': 3.0, 'num_head_6': 3, 'mlp_ratio_6': 3.0, 'num_head_7': 3, 'mlp_ratio_7': 3.0, 'num_head_8': 3, 'mlp_ratio_8': 4.0, 'num_head_9': 3, 'mlp_ratio_9': 4.0, 'num_head_10': 4, 'mlp_ratio_10': 3.0, 'num_head_11': 4, 'mlp_ratio_11': 4.0, 'num_head_12': 4, 'mlp_ratio_12': 3.0, 'num_head_13': 3, 'mlp_ratio_13': 4.0}
-    args.arch = {'embed_dim': 192, 'depth': 13}
+    # args.arch = {'embed_dim': 192, 'depth': 13}
     # seed all
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -95,3 +95,6 @@ if __name__ == "__main__":
 
     main(args)
 
+"""
+python evaluate.py --datapath ../../data/imagenet/val
+"""

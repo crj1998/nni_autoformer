@@ -93,6 +93,7 @@ def main(args):
 
     exp.run(exp_config, args.port)
 
+    # save supernet state_dict manually
     torch.save(model_space.state_dict(), "weights/finetuned220830.pth")
 
 if __name__ == "__main__":

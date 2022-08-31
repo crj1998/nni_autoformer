@@ -12,6 +12,7 @@ import nni
 from nni.nas.experiment.pytorch import RetiariiExeConfig, RetiariiExperiment
 from nni.nas.evaluator.functional import FunctionalEvaluator
 from nni.nas.strategy import RandomOneShot, Random, RegularizedEvolution
+from nni.nas.hub.pytorch.utils.pretrained import load_pretrained_weight
 
 from nn_meter import load_latency_predictor
 
@@ -37,8 +38,11 @@ def evaluate_acc(class_cls, model_space, args):
     # attach base model to strategy
     strategy.attach_model(model_space)
     # load pretrained supernet state dict
-    model_space.load_state_dict(torch.load(args.weights))
-
+    if os.path.exists(args.weights) and os.path.isfile(args.weights):
+        super_state_dict = torch.load(args.weights)
+    else:
+        super_state_dict = load_pretrained_weight(f"autoformer-{args.name}-spernet")
+    strategy.model.load_state_dict(super_state_dict)
     # get the arch dict of the current sub-model
     arch = nni.get_current_parameter()['mutation_summary']
     # slice supernet params to subnet
@@ -53,7 +57,8 @@ def evaluate_acc(class_cls, model_space, args):
     IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
     transform = T.Compose([
-        T.Resize(224, interpolation=T.InterpolationMode.BICUBIC),
+        T.Resize(256, interpolation=T.InterpolationMode.BICUBIC),
+        T.CenterCrop(224),
         T.ToTensor(),
         T.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
     ])
@@ -76,22 +81,27 @@ def evaluate_acc(class_cls, model_space, args):
 
     nni.report_final_result(acc)
 
-@nni.trace
-def builder(name: str, num_classes: int = 1000):
-    return model_builder(name, num_classes)
 
 def main(args):
-    model_space = model_builder(name=args.name, num_classes=args.num_classes)
+    model_space = model_builder(name=args.name, num_classes=args.num_classes, nni_traced=True)
 
     model_filter = LatencyFilter(threshold=args.latency_threshold, predictor=args.latency_filter) if args.latency_filter else None
-    # latency_filter = None
     evaluator = FunctionalEvaluator(evaluate_acc, model_space=model_space, args=args)
-    evolution_strategy = Random(model_filter=model_filter)
+    if args.evolution:
+        evolution_strategy = RegularizedEvolution(
+            sample_size=args.evolution_sample_size,
+            population_size=args.evolution_population_size,
+            cycles=args.max_trial_number,
+            model_filter=model_filter,
+        )
+    else:
+        evolution_strategy = Random(model_filter=model_filter)
+
 
     exp = RetiariiExperiment(model_space, evaluator, strategy=evolution_strategy)
 
     exp_config = RetiariiExeConfig('local')
-    exp_config.experiment_name = 'Random Search(CIFAR10)'
+    exp_config.experiment_name = f'Random Search({args.dataset.upper()})'
     exp_config.trial_concurrency = args.gpus
     exp_config.trial_gpu_number = 1
     exp_config.max_trial_number = args.max_trial_number
@@ -119,7 +129,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--max-trial-number", type=int, default=1000)
+    parser.add_argument("--max-trial-number", type=int, default=512)
+    parser.add_argument("--evolution", action="store_true")
     parser.add_argument("--evolution-sample-size", type=int, default=50)
     parser.add_argument("--evolution-population-size", type=int, default=50)
     parser.add_argument("--evolution-cycles", type=int, default=100)
@@ -129,9 +140,7 @@ if __name__ == "__main__":
 
     args.gpus = min(args.gpus, torch.cuda.device_count())
     if args.dataset.lower() == "cifar10":
-        assert args.num_classes == 10
-    else:
-        assert args.num_classes == 1000
+        args.num_classes == 10
     # assert args.latency_filter in ["cortexA76cpu_tflite21", "adreno640gpu_tflite21", "adreno630gpu_tflite21", "myriadvpu_openvino2019r2"]
 
     # seed all
@@ -144,5 +153,7 @@ if __name__ == "__main__":
     main(args)
 
 """
-python search_cifar.py --weights /root/rjchen/workspace/autoformer/weights/finetuned220829.pth --datapath ../../data
+python search.py --weights weights/finetuned220829.pth --dataset cifar10 --num_classes 10 --datapath ../../data
+python search.py --weights weights/supernet20220822.pth --dataset imagenet --num_classes 1000 --datapath ../../data/imagenet/val
+python search.py --name tiny --weights weights/supernet-tiny.pth --dataset imagenet --num_classes 1000 --datapath ../../data/imagenet/val
 """

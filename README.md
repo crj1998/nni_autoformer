@@ -86,7 +86,9 @@ nnictl view --port 8080 --experiment_dir /root/nni-experiments 7e6l8rqd
 Convert Autoformer official pretrained weight to nni format.
 
 ```
-wget https://github.com/silent-chen/AutoFormer-model-zoo/releases/download/v1.0/supernet-tiny.pth -O official-supernet-tiny.pth
-wget https://github.com/silent-chen/AutoFormer-model-zoo/releases/download/v1.0/supernet-small.pth -O official-supernet-small.pth
-wget https://github.com/silent-chen/AutoFormer-model-zoo/releases/download/v1.0/supernet-base.pth -O official-supernet-base.pth
+mkdir weights
+wget https://github.com/silent-chen/AutoFormer-model-zoo/releases/download/v1.0/supernet-tiny.pth -O weights/official-supernet-tiny.pth
+wget https://github.com/silent-chen/AutoFormer-model-zoo/releases/download/v1.0/supernet-small.pth -O weights/official-supernet-small.pth
+wget https://github.com/silent-chen/AutoFormer-model-zoo/releases/download/v1.0/supernet-base.pth -O weights/official-supernet-base.pth
+python convert.py --name tiny 
 ```

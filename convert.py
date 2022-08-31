@@ -107,9 +107,13 @@ def convert2subnet(official_state_dict, nni_subnet_state_dict):
 
     return state_dict
 
+import argparse
 
-size = "base"
-name = f"autoformer-{size}"
+parser = argparse.ArgumentParser("AutoFormer weights converter")
+parser.add_argument("--name", choices=["tiny", "small", "base"], type=str, default="tiny", help="Autoformer size")
+args = parser.parse_args()
+
+name = f"autoformer-{args.name}"
 init_kwargs = {'qkv_bias': True, 'drop_rate': 0.0, 'drop_path_rate': 0.1, 'global_pool': True, 'num_classes': 1000}
 if name == 'autoformer-tiny':
     mlp_ratio = [3.5, 3.5, 3.0, 3.5, 3.0, 3.0, 4.0, 4.0, 3.5, 4.0, 3.5, 4.0, 3.5] + [3.0]
@@ -166,22 +170,15 @@ elif name == 'autoformer-base':
 
 model_space = hub.AutoformerSpace(**init_kwargs)
 
-official_state_dict = torch.load(f"weights/official-supernet-{size}.pth", map_location="cpu")["model"]
+official_state_dict = torch.load(f"weights/official-supernet-{args.name}.pth", map_location="cpu")["model"]
 
 nni_supernet_state_dict = model_space.state_dict()
 state_dict = convert2supernet(official_state_dict, nni_supernet_state_dict)
 model_space.load_state_dict(state_dict)
-# torch.save(model_space.state_dict(), f"weights/supernet-{size}.pth")
+torch.save(model_space.state_dict(), f"weights/supernet-{args.name}.pth")
 
-model = model_space.load_searched_model(f"autoformer-{size}", pretrained=False, download=False)
+model = model_space.load_searched_model(f"autoformer-{args.name}", pretrained=False, download=False)
 nni_subnet_state_dict = model.state_dict()
 state_dict = convert2subnet(official_state_dict, nni_subnet_state_dict)
 model.load_state_dict(state_dict)
-# torch.save(model.state_dict(), f"weights/subnet-{size}.pth")
-
-# for k, v in official_state_dict.items():
-#     print(k, v.shape)
-# for k, v in nni_supernet_state_dict.items():
-#     print(k, v.shape)
-# for k, v in nni_subnet_state_dict.items():
-#     print(k, v.shape)
+torch.save(model.state_dict(), f"weights/subnet-{args.name}.pth")

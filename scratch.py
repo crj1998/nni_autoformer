@@ -10,14 +10,7 @@ import torch.optim as optim
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as T
 
-
-# from nni.retiarii.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-# from nni.retiarii.hub.pytorch import AutoformerSpace
-# import nni.retiarii.strategy as strategy
-# import nni.retiarii.evaluator.pytorch.lightning as pl
-
 from nni.nas.experiment.pytorch import RetiariiExperiment, RetiariiExeConfig
-from nni.nas.hub.pytorch import AutoformerSpace
 from nni.nas.strategy import RandomOneShot
 import nni.nas.evaluator.pytorch.lightning as pl
 
@@ -25,6 +18,7 @@ from timm.data import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 
+from model import builder as model_builder
 from lighting import Classification
 
 def main(args):
@@ -72,17 +66,7 @@ def main(args):
         strategy = "ddp"
     )
 
-    model_space = AutoformerSpace(
-        search_embed_dim = (192, 216, 240),
-        search_mlp_ratio = (3.0, 3.5, 4.0),
-        search_num_heads = (3, 4),
-        search_depth = (14, 13, 12),
-        qkv_bias = True, 
-        drop_rate = 0.0, 
-        drop_path_rate = 0.1, 
-        global_pool = True, 
-        num_classes = args.num_classes
-    )
+    model_space = model_builder(args.name, args.num_classes)
 
     strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
 
