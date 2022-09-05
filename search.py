@@ -33,16 +33,16 @@ class LatencyFilter:
 @torch.no_grad()
 def evaluate_acc(class_cls, model_space, args):
     model_space = deepcopy(model_space)
-    # define one-shot strategy
-    strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
-    # attach base model to strategy
-    strategy.attach_model(model_space)
-    # load pretrained supernet state dict
     if os.path.exists(args.weights) and os.path.isfile(args.weights):
+        # define one-shot strategy
+        strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
+        # attach base model to strategy
+        strategy.attach_model(model_space)
+        # load pretrained supernet state dict
         super_state_dict = torch.load(args.weights)
+        strategy.model.load_state_dict(super_state_dict)
     else:
-        super_state_dict = load_pretrained_weight(f"autoformer-{args.name}-spernet")
-    strategy.model.load_state_dict(super_state_dict)
+        model_space.load_strategy_checkpoint(f'random-one-shot-{args.name}')
     # get the arch dict of the current sub-model
     arch = nni.get_current_parameter()['mutation_summary']
     # slice supernet params to subnet
@@ -50,8 +50,7 @@ def evaluate_acc(class_cls, model_space, args):
     model = class_cls()
     # load subnet state dict
     model.load_state_dict(state_dict)
-    model.cuda()
-    model.eval()
+    model.eval().cuda()
 
     IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
     IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -155,5 +154,6 @@ if __name__ == "__main__":
 """
 python search.py --weights weights/finetuned220829.pth --dataset cifar10 --num_classes 10 --datapath ../../data
 python search.py --weights weights/supernet20220822.pth --dataset imagenet --num_classes 1000 --datapath ../../data/imagenet/val
+python search.py --name tiny --dataset imagenet --num_classes 1000 --datapath ../../data/imagenet/val
 python search.py --name tiny --weights weights/supernet-tiny.pth --dataset imagenet --num_classes 1000 --datapath ../../data/imagenet/val
 """

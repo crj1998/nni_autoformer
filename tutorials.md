@@ -122,20 +122,15 @@ Also, the `AutoformerSpace` provided in hub has a class method `AutoformerSpace.
 | Base  | `autoformer-base`  |  53.7M  |  82.39    |   95.74   |
 
 ## Obtain the weights of subnet from model space
-After trained a model space with `RandomOneShot` Strategy, you may want to evaulate on the subnet sampled from model space. The search strategy like `Random`, `RegularizedEvolution` will feed the subnet to execute engine. The `Evaluator` will instantiate the subnet class with default weights, so before evaulate the subnet, you need to load the weights of the subnet at first.
-
-The `RandomOneShot` provide a `sub_state_dict` method to obtain the weights of subnet by arch dict.
+After trained a model space with `RandomOneShot` Strategy, you may want to evaulate on the subnet sampled from model space. The search strategy like `Random`, `RegularizedEvolution` will feed the subnet to execute engine and evaluate multiple subnets simultaneously based on the amount of computing resources. 
+You only need to define a subnet `Evaluator`. In this example, the function `evaluate_acc` are wraped in `Evaluator` by `FunctionalEvaluator` to calcuate the classification accuracy of subnet. This function receive one single model class and other keyword arguments specified in `FunctionalEvaluator`. The `Evaluator` will instantiate the subnet model class with default weights, so before evaulate the subnet, you need to load the weights of the subnet at first. 
+The `sub_state_dict(arch)` interface of `RandomOneShot` exports the corresponding subnet state_dict from the model space based on the given architecture dictionary. 
+The `AutoformerSpace` also provide a interface `load_strategy_checkpoint(name)` to get the `RandomOneShot` strategy with well-trained supernet weights. 
 
 ```python
-import nni
-from nni.nas.hub.pytorch import AutoformerSpace
-from nni.nas.strategy import RegularizedEvolution
-from nni.nas.evaluator.functional import FunctionalEvaluator
-from nni.nas.experiment.pytorch import RetiariiExeConfig, RetiariiExperiment
-
 @torch.no_grad()
 def evaluate_acc(class_cls, args):
-    strategy = AutoformerSpace.load_strategy_checkpoint('random-one-shot-tiny')
+    strategy = AutoformerSpace.load_strategy_checkpoint(f'random-one-shot-{args.name}')
     strategy.model.load_state_dict(super_state_dict)
     # get the arch dict of the current sub-model
     arch = nni.get_current_parameter()['mutation_summary']
@@ -149,11 +144,13 @@ def evaluate_acc(class_cls, args):
     dataset = Dataset(...)
     dataloader = DataLoader(dataset, ...)
 
+    # calcuate metric of the subnet on dataset
     for it, (inputs, targets) in enumerate(dataloader):
         inputs, targets = inputs.cuda(), targets.cuda()
         metric = evaluate(model(inputs), targets)
         nni.report_intermediate_result(metric)
 
+    # report final metric of subnet
     nni.report_final_result(metric)
 
 model_space = AutoformerSpace(...)
@@ -168,21 +165,78 @@ exp.run(exp_config, args.port)
 
 
 ## Train the model space
-Training from scratch or finetuning share the same way except for some hyper-parameters. You can use the evaluator `Classification` provided in `nni.nas.evaluator.pytorch.lightning` directly. However, this build-in evaluator has limited functionality. To replicate the training process in the paper, you need to customize a evaluator to support operations such as data augmentation and learning rate scheduling. The evaluator is in fact a `pytorch_lighting` style `LightingModule`. Please refer to `lighting.py` for more details.
+Training from scratch or finetuning share the same way except for some hyper-parameters. You can use the evaluator `Classification` provided in `nni.nas.evaluator.pytorch.lightning` directly. 
 
 ```python
 
 dataset = Dataset(...)
 dataloader = DataLoader(dataset, ...)
 
+# define an evaluator
 evaluator = Classification(...)
+# define the model space
 model_space = AutoformerSpace(...)
+# define the training strategy
 strategy = RandomOneShot(mutation_hooks=model_space.get_extra_mutation_hooks())
 
+# warp model_space, evaluator, strategy
 exp = RetiariiExperiment(model_space, evaluator, [], strategy)
+# define experiment config
 exp_config = RetiariiExeConfig('local')
 exp_config.experiment_name = 'ImageNet train scratch'
 exp_config.execution_engine = 'oneshot'
 
+# launch experiment
 exp.run(exp_config, args.port)
+```
+
+However, this build-in evaluator has limited functionality. To replicate the training process in the paper, you need to customize a evaluator to support operations such as data augmentation and learning rate scheduling. The evaluator is in fact a `pytorch_lighting` style `LightingModule`. The following code snippet shows how to define a evaluator that supports pre-trained weights loading, data augmentation, and learning rate scheduling. Please refer to `lighting.py` for more details.
+
+```python
+@nni.trace
+class _SupervisedLearningModule(LightningModule):
+    trainer: pl.Trainer
+    def __init__(self, ...):
+        super().__init__()
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.mixup_fn = mixup
+        self.weights = weights
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        if self.mixup_fn is not None:
+            x, y = self.mixup_fn(x, y)
+        y_hat = self(x)
+        loss = self.criterion(y_hat, y)
+        ...
+        return loss
+
+    def configure_optimizers(self):
+        return {
+            "optimizer": self.optimizer(...),
+            "lr_scheduler": {
+                "scheduler": self.scheduler(...),
+                "interval": "epoch",
+                "frequency": 1
+            },
+        }
+
+    def on_fit_start(self):
+        if self.weights is not None:
+            self.model.load_state_dict(self.weights)
+
+class Classification(Lightning):
+    def __init__(self, criterion, optimizer, scheduler, mixup, 
+        learning_rate, weight_decay, warmup,
+        train_dataloaders, val_dataloaders, 
+        **trainer_kwargs
+    ):
+        module = _SupervisedLearningModule(...)
+        super().__init__(module, Trainer(**trainer_kwargs), train_dataloaders=train_dataloaders, val_dataloaders=val_dataloaders)
+
 ```
