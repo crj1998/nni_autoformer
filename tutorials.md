@@ -5,7 +5,7 @@ In this tutorial, we demonstrate how to define, train and search the model space
 Through this process, you will learn:
 - How to define a model space compatible with RandomOneShot strategy.
 - How to use the built-in model spaces from NNI model space hub.
-- How to use RandomOneShot exploration strategy to explore a model space.
+- How to use RandomOneShot strategy to train a model space.
 - How to customize evaluators to achieve the best performance.
 
 ## Define a model space
@@ -46,14 +46,11 @@ class ModelSpace(nn.Module):
 ### Customize mixed operation
 In general, the basic operations provided by NNI are sufficient for most scenarios. However, you can also customize mixedOperation as needed. 
 
-The customization process consists of two main parts. You first need to define the module when the parameters are immutable and wrap it with the `basic_unit` decorator. When define model space, you will use this module.
-Secondly, you need to define the corresponding mixedoperation of the previous module. This mixedoperation inherits from `MixedOperation` and previous module.
-You must specify the module bound to the mixed operation by `bound_type` and limit the arguments that supports mutator through `argument_list`.
-You also must overwrite three class method: `super_init_argument`, `slice_param`, `forward_with_args`.
-The `super_init_argument` will determine the maximum parameter that the Module needs to initialize based on the variable arguments. The `slice_param` will select the desired parameter from the largest parameter. The `forward_with_args` will determine the forward process. It will invoke `slice_param` method.
+The customization process consists of two main parts: define a torch-style `nn.Module` and corresponding `MixedOperation`.
 
 The following example shows how to convert an absolute position embedding module commonly used in Transformer into a one-shot compatible mixedOperation.
 
+Firstly, you need to define the module when the parameters are immutable and wrap it with the `basic_unit` decorator. In this example, we define an `AbsPosEmbed` module inherits from `nn.Module`. The code is basically the same as PyTorch, except for the addition of a 'basic_unit' decorator. When define model space, you will use this module class.
 ```python
 @basic_unit
 class AbsPosEmbed(nn.Module):
@@ -67,7 +64,18 @@ class AbsPosEmbed(nn.Module):
     def forward(self, x):
         return x + self.pos_embed
 
+@model_wrapper
+class ModelSpace(nn.Module):
+    def __init__(self, ...):
+        ...
+        self.abs_embed = AbsPosEmbed(14*14+1, nn.ValueChoice([192, 216, 240], label="embed_dim"))
+    
+```
+Secondly, you need to define the corresponding `MixedOperation` of the previous module. This `MixedOperation` inherits from `MixedOperation` and the previous module `AbsPosEmbed`. You must specify the module bound to the mixed operation by `bound_type` and limit the arguments that supports mutator through `argument_list`.
+You also must overwrite three class method: `super_init_argument`, `slice_param`, `forward_with_args`. The `super_init_argument` will determine the maximum parameter that the Module needs to initialize based on the variable arguments. The `slice_param` will select the desired parameter from the largest parameter. The `forward_with_args` will determine the forward process. It will invoke `slice_param` method .
 
+
+```python
 class MixedAbsPosEmbed(MixedOperation, AbsPosEmbed):
     """ Mixed absolute position embedding add operation.
 
